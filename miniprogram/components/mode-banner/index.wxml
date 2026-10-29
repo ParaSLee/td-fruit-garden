@@ -1,0 +1,1 @@
+<view wx:if="{{local}}" class="mode"><text class="dot">●</text> 本机体验 · 记录仅保存在当前设备，组队分享需连接云端</view>

@@ -1,0 +1,1 @@
+.heading { font-size:44rpx; margin:32rpx 0 12rpx; }.prose { padding:28rpx; margin-top:26rpx; font-size:25rpx; color:#818775; line-height:1.9; }.prose .section-title { color:#4F5B41; font-size:29rpx; margin-bottom:18rpx; }.prose view + view { margin-top:18rpx; }

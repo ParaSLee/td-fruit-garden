@@ -1,0 +1,52 @@
+page { background: #F6F5F0; color: #242722; font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif; font-size: 28rpx; line-height: 1.6; --orange: #D75A32; --muted: #85877D; }
+view, text, button, input, textarea { box-sizing: border-box; }
+button { font-size: 28rpx; border-radius: 24rpx; line-height: 1.5; padding: 24rpx 28rpx; margin: 0; font-weight: 600; background: #ECEDE5; color: #30362D; }
+button::after { border: 0; }
+button[disabled] { opacity: .45; color: #6D7269; background: #E1E3DA; }
+button.primary { background: #D75A32; color: #FFF; box-shadow: 0 8rpx 0 rgba(146, 60, 35, .12); }
+button.dark { background: #30382D; color: white; }
+button.secondary { background: #EFEEE7; color: #52594A; }
+button.outline { background: transparent; border: 2rpx solid #DEDCD2; }
+button.small { padding: 14rpx 22rpx; font-size: 24rpx; border-radius: 18rpx; }
+button.link { padding: 10rpx 0; background: transparent; color: #D75A32; font-size: 25rpx; }
+.page { padding: 28rpx 36rpx 200rpx; }
+.subpage { padding: 30rpx 36rpx 80rpx; padding-bottom: calc(80rpx + env(safe-area-inset-bottom)); }
+.row { display: flex; align-items: center; justify-content: space-between; }
+.flex { display: flex; align-items: center; }
+.stack > view + view, .stack > button + button { margin-top: 24rpx; }
+.muted { color: #85877D; }
+.tiny { font-size: 22rpx; }
+.caption { color: #73796D; font-size: 24rpx; }
+.eyebrow { font-size: 20rpx; letter-spacing: 4rpx; font-weight: 700; color: #858A7C; }
+.title { font-size: 48rpx; font-weight: 800; line-height: 1.25; letter-spacing: -1.6rpx; }
+.section-title { font-size: 31rpx; font-weight: 700; }
+.card { background: #FFF; border: 2rpx solid #EBEBE3; border-radius: 32rpx; padding: 32rpx; }
+.section { margin-top: 38rpx; }
+.section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22rpx; }
+.badge { display: inline-flex; align-items: center; padding: 8rpx 17rpx; border-radius: 100rpx; background: #E9EDD9; color: #5C7042; font-size: 21rpx; font-weight: 600; }
+.badge.orange { background: #FBE9DE; color: #BB502C; }
+.badge.gray { background: #F0F1EC; color: #85877D; }
+.icon-box { height: 78rpx; width: 78rpx; border-radius: 24rpx; display: flex; align-items: center; justify-content: center; background: #F8E8DE; color: #D75A32; font-size: 43rpx; margin-right: 22rpx; flex-shrink: 0; font-weight: 500; }
+.divider { height: 2rpx; background: #EEEEE7; margin: 28rpx 0; }
+.progress-track { height: 14rpx; border-radius: 99rpx; overflow: hidden; background: #E8E7DC; }
+.progress-fill { height: 100%; border-radius: 99rpx; background: #D75A32; transition: width .35s ease; }
+.metrics { display: flex; justify-content: space-between; }
+.metric { flex: 1; text-align: center; }
+.metric + .metric { border-left: 2rpx solid #ECEDE4; }
+.metric-value { font-size: 44rpx; line-height: 1.2; font-weight: 800; font-variant-numeric: tabular-nums; }
+.metric-label { font-size: 21rpx; color: #85877D; margin-top: 12rpx; }
+.field-label { font-size: 27rpx; font-weight: 650; margin: 28rpx 0 16rpx; }
+.input { border: 2rpx solid #E5E5DB; border-radius: 22rpx; background: #FFF; padding: 22rpx 24rpx; width: 100%; height: 94rpx; font-size: 28rpx; }
+textarea.input { height: 210rpx; line-height: 1.7; }
+.field-hint { font-size: 22rpx; color: #92958A; margin-top: 10rpx; }
+.chips { display: flex; flex-wrap: wrap; margin: -8rpx; }
+.chip { padding: 15rpx 29rpx; background: #EBEDE3; border: 2rpx solid transparent; border-radius: 20rpx; margin: 8rpx; font-size: 25rpx; }
+.chip.selected { color: #C04E29; border-color: #DB6B43; background: #FFF1E6; font-weight: 700; }
+.photos { display: flex; flex-wrap: wrap; margin: -7rpx; }
+.photo { width: 164rpx; height: 164rpx; margin: 7rpx; border-radius: 20rpx; background: #EBEDE5; }
+.avatar { width: 70rpx; height: 70rpx; border-radius: 24rpx; background: #F2E6D7; color: #AF673C; display: flex; align-items: center; justify-content: center; font-size: 28rpx; font-weight: 800; flex-shrink: 0; }
+.empty-icon { width: 130rpx; height: 130rpx; margin: 10rpx auto 30rpx; display: flex; align-items: center; justify-content: center; font-size: 70rpx; border-radius: 44rpx; color: #D75A32; background: #F6E9DF; }
+.center { text-align: center; }
+.bottom-action { margin-top: 38rpx; }
+.error { color: #A84431; background: #F9E9E0; padding: 20rpx; border-radius: 18rpx; font-size: 24rpx; margin: 20rpx 0; }
+.brand-mark { display: inline-flex; width: 62rpx; height: 62rpx; background: #D75A32; border-radius: 20rpx; color: #FFF5E8; align-items: center; justify-content: center; font-size: 34rpx; font-weight: 800; transform: rotate(-8deg); }

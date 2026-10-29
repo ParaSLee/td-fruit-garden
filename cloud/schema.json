@@ -1,0 +1,15 @@
+{
+  "collections": [
+    { "name": "mm_users", "indexes": [] },
+    { "name": "mm_goals", "indexes": [{ "ownerId": 1, "id": -1 }] },
+    { "name": "mm_records", "indexes": [{ "goalId": 1, "date": -1 }] },
+    { "name": "mm_teams", "indexes": [] },
+    { "name": "mm_shares", "indexes": [] },
+    { "name": "mm_watches", "indexes": [{ "watcherId": 1, "enabled": 1, "id": 1 }, { "ownerId": 1, "enabled": 1, "id": 1 }] },
+    { "name": "mm_nudges", "indexes": [{ "ownerId": 1, "createdAt": -1 }, { "ownerId": 1, "read": 1, "id": 1 }] },
+    { "name": "mm_limits", "indexes": [] },
+    { "name": "mm_uploads", "indexes": [] }
+  ],
+  "databaseRulesFile": "database.rules.json",
+  "storageRulesFile": "storage.rules.json"
+}

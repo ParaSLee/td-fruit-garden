@@ -1,0 +1,1 @@
+{ "desc": "Private progress and invite tokens must not be indexed", "rules": [{ "action": "disallow", "page": "*" }] }

@@ -1,0 +1,30 @@
+<view class="page">
+  <mode-banner />
+  <view class="row brand-row"><view class="flex"><view class="brand-mark">猛</view><view class="brand-word">猛男打卡<view class="eyebrow">SHOW UP. EVERY DAY.</view></view></view><view class="date-pill">{{todayLabel}}</view></view>
+  <state-panel loading="{{loading}}" error="{{loadError}}" bind:retry="refresh" />
+  <block wx:if="{{!loading && !loadError}}">
+    <view class="hero-copy"><view class="eyebrow">HEY, {{user.nickname}}</view><view class="hero-title">今天，也要<text class="serif">说到做到。</text></view><view class="caption">不必一下子很厉害，先比昨天好一点。</view></view>
+    <view wx:if="{{!goal}}" class="start-card">
+      <view class="start-top"><view><view class="mini-label">YOUR FIRST CHALLENGE</view><view class="start-title">先从一件小事开始</view><view class="start-description">选一个目标，留一点时间给自己。</view></view><view class="dumbbell"><view class="weight left"></view><view class="bar"></view><view class="weight right"></view></view></view>
+      <view class="category-preview"><view>☾ 早睡</view><view>◉ 多喝水</view><view>↗ 锻炼</view></view>
+      <button class="primary start-goal" bindtap="createGoal">开启我的第一个挑战 <text>↗</text></button>
+      <view class="tiny center muted start-foot">一个目标 · 每天一次 · 说到做到</view>
+    </view>
+    <view wx:else class="goal-card">
+      <view class="row"><view class="badge" style="color:{{goal.categoryInfo.color}}">{{goal.categoryInfo.icon}} {{goal.categoryInfo.name}}挑战</view><text class="tiny muted">{{goal.days}} 天养成计划</text></view>
+      <view class="goal-title">{{goal.title}}</view>
+      <view class="day-row"><view class="day-number">{{summary.dayLabel}}<text>/ {{goal.days}}</text></view><view class="day-status"><view class="badge {{summary.todayDone ? '' : 'orange'}}">{{summary.finished ? '本轮已结束' : summary.todayDone ? '✓ 今日已完成' : '今日待打卡'}}</view><view class="tiny muted">挑战第 {{summary.dayIndex}} 天</view></view></view>
+      <view class="progress-track"><view class="progress-fill" style="width:{{summary.progress}}%"></view></view>
+      <view class="row progress-meta"><text>已完成 {{summary.count}} 天</text><text>{{summary.progress}}%</text></view>
+      <button wx:if="{{!summary.finished}}" class="primary checkin-button" bindtap="checkin">{{summary.todayDone ? '✓ 已打卡 · 补充今日记录' : '完成今日打卡'}} <text>↗</text></button>
+      <button wx:else class="primary" bindtap="finishGoal">收好战绩，开启下个挑战 ↗</button>
+      <view class="goal-foot">{{summary.todayDone ? '今天的努力已存档，明天继续。' : '每一次做到，都算数。'}}</view>
+    </view>
+    <view wx:if="{{goal}}" class="card metrics section"><view class="metric"><view class="metric-value">{{summary.streak}}<text class="unit">天</text></view><view class="metric-label">连续坚持</view></view><view class="metric"><view class="metric-value">{{summary.count}}<text class="unit">天</text></view><view class="metric-label">累计完成</view></view><view class="metric"><view class="metric-value">{{summary.rate}}<text class="unit">%</text></view><view class="metric-label">当前完成率</view></view></view>
+    <view class="section" wx:if="{{goal}}"><view class="section-head"><text class="section-title">最近七天</text><text class="caption" bindtap="showStats">完整战绩 ↗</text></view><view class="card week-card"><view wx:for="{{summary.week}}" wx:key="date" class="week-day"><view class="week-label">{{item.today ? '今' : item.label}}</view><view class="week-check {{item.done ? 'done' : ''}} {{!item.eligible ? 'outside' : ''}}">{{item.done ? '✓' : '·'}}</view></view></view></view>
+    <view wx:if="{{nudges.length}}" class="section"><view class="section-head"><text class="section-title">搭子的提醒</text><text class="caption" bindtap="dismissNudges">标为已读</text></view><view wx:for="{{nudges}}" wx:key="id" class="nudge"><text class="nudge-from">{{item.senderName}}</text><view>{{item.text}}</view></view></view>
+    <view class="section"><view class="section-head"><text class="section-title">一个人开始，一起坚持</text></view><view class="buddy-card" bindtap="showTeam"><view><view class="buddy-title">找几个搭子，组个队</view><view class="caption">互相看见进步，也互相拉一把。</view></view><view class="buddy-arrow">↗</view></view></view>
+    <view class="share-row" wx:if="{{goal}}"><button class="outline" bindtap="shareProgress">↗ 分享我的进度</button><button class="outline" bindtap="inviteSupervisor">♧ 邀请好友督促</button></view>
+    <view class="page-sign">MAKE A PROMISE. KEEP IT.</view>
+  </block>
+</view>

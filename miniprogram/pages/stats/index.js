@@ -16,7 +16,7 @@ Page({
   async moreGoals() {
     if (!this.data.next || this.data.loadingMore) return;
     this.setData({ loadingMore: true });
-    try { const result = await P.api.call('goal.list', { after: this.data.next }); const goals = this.data.goals.concat(result.goals); this.setData({ goals, goalLabels: goals.map(g => g.title + (g.status === 'archived' ? ' · 已结束' : ' · 进行中')), next: result.next }); }
+    try { const result = await P.api.call('goal.list', { after: this.data.next }); const known = new Set(this.data.goals.map(goal => goal.id)); const goals = this.data.goals.concat(result.goals.filter(goal => !known.has(goal.id))); this.setData({ goals, goalLabels: goals.map(g => g.title + (g.status === 'archived' ? ' · 已结束' : ' · 进行中')), next: result.next }); }
     catch (error) { P.api.error(error); }
     finally { this.setData({ loadingMore: false }); }
   },

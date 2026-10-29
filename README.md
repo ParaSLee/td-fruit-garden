@@ -34,6 +34,8 @@ npm run verify
 - [技术设计](docs/technical.md)
 - [知识库技术子文档](https://white-light.feishu.cn/docx/R92pdzeOvoyE2Ux0CyicgqUAnog)
 - [交付与验证记录](docs/delivery.md)
+- [云端手机与双账号验收步骤](docs/acceptance.md)
+- [云端依赖核对](docs/dependency-review.md)
 
 ## 目录
 

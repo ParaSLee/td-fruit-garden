@@ -172,3 +172,26 @@ test('profile pagination retains rows after failure, retries and ignores an old 
   await profile.refresh(); release(); await pending;
   assert.equal(profile.data.watching.length, 0); assert.equal(profile.data.watchingNext, '');
 });
+test('history pagination after refresh does not duplicate goals or lose selected historical records', async () => {
+  const r = simulatedCloud();
+  let first;
+  for (let i = 0; i < 21; i++) {
+    const goal = await r.api.call('goal.create', { category: 'water', title: '历史目标 ' + i, days: 7 });
+    if (i === 0) {
+      first = goal;
+      await r.api.call('record.save', { goalId: goal.id, note: '保留历史记录', photoIds: [] });
+    }
+    if (i < 20) await r.api.call('goal.archive', { goalId: goal.id });
+  }
+  const stats = r.page('stats'); await stats.refresh();
+  assert.equal(stats.data.goals.length, 20);
+  await stats.moreGoals(); assert.equal(stats.data.goals.length, 21);
+  await stats.refresh(); await stats.moreGoals();
+  assert.equal(stats.data.goals.length, 21);
+  assert.equal(new Set(stats.data.goals.map(goal => goal.id)).size, 21);
+  const index = stats.data.goals.findIndex(goal => goal.id === first.id);
+  await stats.chooseGoal({ detail: { value: index } });
+  assert.equal(stats.data.selectedGoalId, first.id);
+  assert.equal(stats.data.records[0].note, '保留历史记录');
+  assert.equal(stats.data.summary.count, 1);
+});

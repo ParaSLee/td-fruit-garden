@@ -19,11 +19,11 @@ function createService({ store, now = Date.now, randomId, mediaURLs = async ids 
       return user;
     });
   }
-  async function readableShare(token) {
+  async function readableShare(token, source = store) {
     D.assert(typeof token === 'string' && /^[a-zA-Z0-9_-]{32,100}$/.test(token), 'SHARE_INVALID', '分享链接已失效');
-    const share = await store.get('shares', token);
+    const share = await source.get('shares', token);
     D.assert(share && !share.revoked && share.expiresAt > now(), 'SHARE_INVALID', '分享已失效，请让好友重新分享');
-    const goal = await store.get('goals', share.goalId);
+    const goal = await source.get('goals', share.goalId);
     D.assert(goal, 'SHARE_INVALID', '这个目标已不可访问');
     return { share, goal };
   }
@@ -52,17 +52,17 @@ function createService({ store, now = Date.now, randomId, mediaURLs = async ids 
     }));
     return { id: team.id, name: team.name, motto: team.motto, inviteCode: team.id, captainId: team.captainId, members, checkedToday: members.filter(m => m.summary && m.summary.todayDone).length, maxMembers: 20 };
   }
-  async function nudge(uid, ownerId, goalId, key, textIndex) {
+  async function nudge(tx, uid, ownerId, goalId, keyPrefix, textIndex) {
     D.assert(uid !== ownerId, 'SELF_NUDGE', '不用提醒自己，直接去打卡吧');
     D.assert(Number.isInteger(textIndex) && textIndex >= 0 && textIndex < D.NUDGE_TEXTS.length, 'INVALID_INPUT', '请选择提醒语');
-    const sender = await store.get('users', uid);
-    const targetGoal = await store.get('goals', goalId);
-    D.assert(targetGoal && targetGoal.status === 'active' && D.dateKey(now()) <= D.addDays(targetGoal.startDate, targetGoal.days - 1), 'GOAL_ENDED', '这个挑战已结束');
-    await store.transact(async tx => {
-      const existing = await tx.get('nudges', key);
-      D.assert(!existing, 'ALREADY_NUDGED', '今天已经提醒过啦，给 TA 一点时间');
-      await tx.set('nudges', key, { id: key, ownerId, senderId: uid, senderName: sender.nickname, goalId, text: D.NUDGE_TEXTS[textIndex], date: D.dateKey(now()), createdAt: now(), read: false });
-    });
+    const sender = await tx.get('users', uid);
+    const targetGoal = await tx.get('goals', goalId);
+    const today = D.dateKey(now());
+    D.assert(targetGoal && targetGoal.ownerId === ownerId && targetGoal.status === 'active' && today <= D.addDays(targetGoal.startDate, targetGoal.days - 1), 'GOAL_ENDED', '这个挑战已结束');
+    const key = keyPrefix + '_' + today;
+    const existing = await tx.get('nudges', key);
+    D.assert(!existing, 'ALREADY_NUDGED', '今天已经提醒过啦，给 TA 一点时间');
+    await tx.set('nudges', key, { id: key, ownerId, senderId: uid, senderName: sender.nickname, goalId, text: D.NUDGE_TEXTS[textIndex], date: today, createdAt: now(), read: false });
     return { sent: true };
   }
   const actions = {
@@ -200,13 +200,16 @@ function createService({ store, now = Date.now, randomId, mediaURLs = async ids 
       });
       return { left: true };
     },
-    async 'team.nudge'(data, uid, user) {
+    async 'team.nudge'(data, uid) {
       needCloud();
-      const team = user.teamId ? await store.get('teams', user.teamId) : null;
-      D.assert(team && team.memberIds.includes(uid) && team.memberIds.includes(data.targetId), 'TEAM_ACCESS', '只能提醒当前小队的成员');
-      const target = await store.get('users', data.targetId);
-      D.assert(target && target.teamId === team.id && target.activeGoalId, 'NO_GOAL', 'TA 还没有开始挑战');
-      return nudge(uid, target.id, target.activeGoalId, 'team_' + team.id + '_' + uid + '_' + target.id + '_' + D.dateKey(now()), Number(data.textIndex || 0));
+      return store.transact(async tx => {
+        const user = await tx.get('users', uid);
+        const team = user.teamId ? await tx.get('teams', user.teamId) : null;
+        D.assert(team && team.memberIds.includes(uid) && team.memberIds.includes(data.targetId), 'TEAM_ACCESS', '只能提醒当前小队的成员');
+        const target = await tx.get('users', data.targetId);
+        D.assert(target && target.teamId === team.id && target.activeGoalId, 'NO_GOAL', 'TA 还没有开始挑战');
+        return nudge(tx, uid, target.id, target.activeGoalId, 'team_' + team.id + '_' + uid + '_' + target.id, Number(data.textIndex || 0));
+      });
     },
     async 'share.create'(data, uid, user) {
       needCloud();
@@ -236,13 +239,15 @@ function createService({ store, now = Date.now, randomId, mediaURLs = async ids 
     },
     async 'share.join'(data, uid) {
       needCloud();
-      const { share, goal } = await readableShare(data.token);
-      D.assert(share.mode === 'supervise', 'SHARE_ACCESS', '这是进度分享，请让好友发送督促邀请');
-      D.assert(share.ownerId !== uid, 'SELF_NUDGE', '邀请一个好友来监督你吧');
-      D.assert(goal.status === 'active', 'GOAL_ENDED', '这个目标已结束');
-      const id = goal.id + '_' + uid;
-      await store.set('watches', id, { id, watcherId: uid, ownerId: share.ownerId, goalId: goal.id, enabled: true, createdAt: now() });
-      return { watching: true };
+      return store.transact(async tx => {
+        const { share, goal } = await readableShare(data.token, tx);
+        D.assert(share.mode === 'supervise', 'SHARE_ACCESS', '这是进度分享，请让好友发送督促邀请');
+        D.assert(share.ownerId !== uid, 'SELF_NUDGE', '邀请一个好友来监督你吧');
+        D.assert(goal.status === 'active' && D.dateKey(now()) <= D.addDays(goal.startDate, goal.days - 1), 'GOAL_ENDED', '这个目标已结束');
+        const id = goal.id + '_' + uid;
+        await tx.set('watches', id, { id, watcherId: uid, ownerId: share.ownerId, goalId: goal.id, enabled: true, createdAt: now() });
+        return { watching: true };
+      });
     },
     async 'watch.list'(_, uid) {
       needCloud();
@@ -255,9 +260,11 @@ function createService({ store, now = Date.now, randomId, mediaURLs = async ids 
     },
     async 'watch.nudge'(data, uid) {
       needCloud();
-      const watch = await store.get('watches', data.watchId);
-      D.assert(watch && watch.watcherId === uid && watch.enabled, 'WATCH_ACCESS', '你还没有成为这个目标的监督人');
-      return nudge(uid, watch.ownerId, watch.goalId, 'watch_' + watch.goalId + '_' + uid + '_' + D.dateKey(now()), Number(data.textIndex || 0));
+      return store.transact(async tx => {
+        const watch = await tx.get('watches', data.watchId);
+        D.assert(watch && watch.watcherId === uid && watch.enabled, 'WATCH_ACCESS', '你还没有成为这个目标的监督人');
+        return nudge(tx, uid, watch.ownerId, watch.goalId, 'watch_' + watch.goalId + '_' + uid, Number(data.textIndex || 0));
+      });
     },
     async 'watch.remove'(data, uid) {
       needCloud();

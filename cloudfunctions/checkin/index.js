@@ -2,6 +2,7 @@ const cloud = require('wx-server-sdk');
 const crypto = require('node:crypto');
 const { createService } = require('./lib/service');
 const { createCloudStore } = require('./store');
+const { resolveMediaFiles } = require('./media');
 const { AppError, assert } = require('./lib/domain');
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 const store = createCloudStore(cloud.database());
@@ -37,16 +38,14 @@ exports.main = async event => {
           await store.set('uploads', key, { id: key, ownerId: uid, fileID, checkedAt: Date.now() });
         }
       },
-      async mediaURLs(ids) {
-        const result = await cloud.getTempFileURL({ fileList: ids.map(fileID => ({ fileID, maxAge: 600 })) });
-        return result.fileList.filter(file => file.status === 0).map(file => ({ id: file.fileID, url: file.tempFileURL }));
-      }
+      mediaURLs: ids => resolveMediaFiles(cloud, ids)
     });
     const data = await service.execute(event.action, event.data || {}, uid);
     return { ok: true, data };
   } catch (error) {
     if (error instanceof AppError) return { ok: false, error: { code: error.code, message: error.message } };
     console.error('checkin request failed', { action: event && event.action, code: error.errCode || error.code, message: error.message });
-    return { ok: false, error: { code: 'SERVICE_UNAVAILABLE', message: '服务暂时未就绪，请稍后重试；若持续出现，请联系小程序管理员' } };
+    const reasonCode = String(error.errCode || error.code || 'UNKNOWN').replace(/[^A-Za-z0-9_.:-]/g, '').slice(0, 64);
+    return { ok: false, error: { code: 'SERVICE_UNAVAILABLE', reasonCode, message: '服务暂时未就绪，请稍后重试；若持续出现，请联系小程序管理员' } };
   }
 };

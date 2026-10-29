@@ -38,7 +38,7 @@ Page({
         const photo = photos[index];
         if (photo.id) continue;
         if (P.api.cloudEnabled()) {
-          const info = await wx.getFileInfo({ filePath: photo.tempPath });
+          const info = await new Promise((resolve, reject) => wx.getFileSystemManager().getFileInfo({ filePath: photo.tempPath, success: resolve, fail: reject }));
           if (info.size > 1024 * 1024) throw new Error('图片压缩后仍超过 1 MB，请选择较小图片');
           const extension = /\.png(?:$|\?)/i.test(photo.tempPath) ? 'png' : 'jpg';
           const random = await wx.getRandomValues({ length: 16 });

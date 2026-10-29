@@ -129,6 +129,51 @@ test('strangers and former team members cannot send team nudges', async () => {
   await s.call('team.leave', {}, 'bobby');
   await assert.rejects(s.call('team.nudge', { targetId: 'alice' }, 'bobby'), { code: 'TEAM_ACCESS' });
 });
+function interleavedService() {
+  const base = createMemoryStore();
+  const options = { now: () => Date.parse('2026-10-29T04:00:00Z'), randomId: n => crypto.randomBytes(n).toString('hex') };
+  const direct = createService({ ...options, store: base });
+  let pending; let mutationCount = 0;
+  async function beforeMutation() {
+    // The first transaction ensures the caller exists. Commit the competing
+    // change before the action's subsequent transaction or standalone write.
+    if (pending && ++mutationCount === 2) { const fn = pending; pending = null; await fn(); }
+  }
+  const store = { ...base,
+    async transact(fn) { await beforeMutation(); return base.transact(fn); },
+    async set(...args) { await beforeMutation(); return base.set(...args); }
+  };
+  const service = createService({ ...options, store });
+  const call = (action, data = {}, uid = 'alice') => direct.execute(action, data, uid);
+  return { call, act: (action, data, uid = 'bobby') => service.execute(action, data, uid), interleave(fn) { pending = fn; mutationCount = 0; }, base };
+}
+test('a share revoked before supervision is committed cannot create a relationship', async () => {
+  const s = interleavedService();
+  await s.call('goal.create', { category: 'water', title: '每天八杯水', days: 7 });
+  const share = await s.call('share.create', { mode: 'supervise' });
+  s.interleave(() => s.call('share.revoke', { token: share.token }));
+  await assert.rejects(s.act('share.join', { token: share.token }), { code: 'SHARE_INVALID' });
+  assert.equal((await s.call('watch.list', {}, 'bobby')).watching.length, 0);
+});
+test('a removed supervision relationship cannot authorize an in-flight nudge', async () => {
+  const s = interleavedService();
+  const goal = await s.call('goal.create', { category: 'water', title: '每天八杯水', days: 7 });
+  const share = await s.call('share.create', { mode: 'supervise' });
+  await s.call('share.join', { token: share.token }, 'bobby');
+  const watchId = goal.id + '_bobby';
+  s.interleave(() => s.call('watch.remove', { watchId }));
+  await assert.rejects(s.act('watch.nudge', { watchId }), { code: 'WATCH_ACCESS' });
+  assert.equal(Object.keys(s.base.snapshot().nudges || {}).length, 0);
+});
+test('leaving a team before a nudge commits removes its authorization', async () => {
+  const s = interleavedService();
+  await s.call('goal.create', { category: 'water', title: '每天八杯水', days: 7 });
+  const { team } = await s.call('team.create', { name: '并发退出测试' });
+  await s.call('team.join', { code: team.id }, 'bobby');
+  s.interleave(() => s.call('team.leave', {}, 'bobby'));
+  await assert.rejects(s.act('team.nudge', { targetId: 'alice' }), { code: 'TEAM_ACCESS' });
+  assert.equal(Object.keys(s.base.snapshot().nudges || {}).length, 0);
+});
 test('local experience persists private records and refuses to generate fake social links', async () => {
   const s = setup({ cloudEnabled: false }); const g = await s.goal();
   await s.call('record.save', { goalId: g.id, note: 'local', photoIds: ['local:wxfile://proof.jpg'] });

@@ -2,8 +2,10 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const root = path.resolve(__dirname, '../miniprogram');
-function runtime() {
+function runtime({ cloud = false } = {}) {
   for (const key of Object.keys(require.cache)) if (key.startsWith(root)) delete require.cache[key];
+  const configFile = require.resolve(path.join(root, 'config.js'));
+  require.cache[configFile] = { id: configFile, filename: configFile, loaded: true, exports: { cloudEnv: cloud ? 'test-cloud' : '' } };
   const storage = {}; const calls = []; const app = { globalData: {} };
   global.getApp = () => app;
   global.wx = {
@@ -62,4 +64,27 @@ test('profile nickname, archive and historical statistics work together', async 
   const profile = r.page('profile'); await profile.refresh(); profile.typeNickname({ detail: { value: '行动派' } }); await profile.saveNickname();
   assert.equal(profile.data.user.nickname, '行动派'); await profile.finishGoal(); assert.equal(profile.data.goal, null);
   const stats = r.page('stats'); await stats.refresh(); assert.equal(stats.data.goal.status, 'archived'); assert.equal(stats.data.summary.count, 1);
+});
+test('cloud photo submission retains uploaded proof after a save failure and reuses it on retry', async () => {
+  const r = runtime({ cloud: true });
+  const snapshot = { user: { id: 'test-user' }, goal: { id: 'test-goal', category: 'water', title: '联调目标' }, summary: { finished: false }, today: '2026-10-29', records: [] };
+  let uploads = 0; let saves = 0;
+  wx.getFileSystemManager = () => ({ getFileInfo(options) { options.success({ size: 2000 }); } });
+  wx.getRandomValues = async () => ({ randomValues: new Uint8Array(16).buffer });
+  wx.cloud = {
+    async uploadFile() { uploads++; return { fileID: 'cloud://test/proofs/test-user/photo.jpg' }; },
+    async callFunction({ data }) {
+      if (data.action === 'bootstrap') return { result: { ok: true, data: snapshot } };
+      assert.equal(data.action, 'record.save');
+      assert.deepEqual(data.data.photoIds, ['cloud://test/proofs/test-user/photo.jpg']);
+      saves++;
+      return { result: saves === 1 ? { ok: false, error: { code: 'SERVICE_UNAVAILABLE', message: '请重试' } } : { ok: true, data: { date: '2026-10-29' } } };
+    }
+  };
+  const page = r.page('checkin'); await page.refresh(); await page.addPhoto();
+  page.typeNote({ detail: { value: '保留表单' } }); await page.save();
+  assert.equal(page.data.saved, false); assert.equal(page.data.note, '保留表单'); assert.equal(page.data.formError, '请重试');
+  assert.equal(page.data.photos[0].id, 'cloud://test/proofs/test-user/photo.jpg');
+  await page.save();
+  assert.equal(page.data.saved, true); assert.equal(uploads, 1); assert.equal(saves, 2);
 });

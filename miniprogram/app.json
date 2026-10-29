@@ -1,7 +1,7 @@
 {
   "pages": [
     "pages/today/index", "pages/team/index", "pages/stats/index", "pages/profile/index",
-    "pages/goal/index", "pages/checkin/index", "pages/share/index", "pages/privacy/index"
+    "pages/goal/index", "pages/checkin/index", "pages/share/index", "pages/privacy/index", "pages/member/index"
   ],
   "window": {
     "navigationBarTitleText": "猛男打卡",
@@ -20,7 +20,7 @@
       { "pagePath": "pages/profile/index", "text": "我的" }
     ]
   },
-  "usingComponents": { "state-panel": "/components/state-panel/index", "mode-banner": "/components/mode-banner/index" },
+  "usingComponents": { "state-panel": "/components/state-panel/index", "mode-banner": "/components/mode-banner/index", "user-avatar": "/components/user-avatar/index" },
   "style": "v2",
   "lazyCodeLoading": "requiredComponents",
   "sitemapLocation": "sitemap.json"

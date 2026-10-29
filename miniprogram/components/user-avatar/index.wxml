@@ -1,0 +1,1 @@
+<view class="avatar {{large ? 'large' : ''}}"><image wx:if="{{user.avatarUrl && !failed}}" src="{{user.avatarUrl}}" mode="aspectFill" binderror="imageFailed" /><text wx:else>{{user.initial || '猛'}}</text></view>

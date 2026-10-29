@@ -28,6 +28,7 @@ Page({
     finally { this.setData({ saving: false }); }
   },
   copyCode() { wx.setClipboardData({ data: this.data.team.inviteCode }); },
+  viewMember(e) { P.go('/pages/member/index?id=' + encodeURIComponent(e.currentTarget.dataset.id)); },
   async nudge(e) {
     const id = e.currentTarget.dataset.id;
     try { await P.api.call('team.nudge', { targetId: id }); wx.showToast({ title: '站内提醒已送达' }); await this.refresh(); }

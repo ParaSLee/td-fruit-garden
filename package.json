@@ -1,6 +1,6 @@
 {
   "name": "mengnan-checkin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "猛男打卡 · 说到做到，每天一点",
   "scripts": {
@@ -10,7 +10,9 @@
     "verify": "npm run build && npm run check && npm test",
     "test:pages": "node --test test/pages.test.js"
   },
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "devDependencies": {
     "miniprogram-api-typings": "5.2.3"
   }

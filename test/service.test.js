@@ -11,6 +11,75 @@ function setup(options = {}) {
   const goal = (uid = 'alice') => call('goal.create', { category: 'exercise', title: '每天锻炼半小时', days: 7 }, uid);
   return { store, service, call, goal, nextDay: () => { timestamp += 86400000; }, advance: amount => { timestamp += amount; } };
 }
+test('profile avatar ownership, moderation and partial edits preserve private proof separation', async () => {
+  const checked = [];
+  const s = setup({ validateMedia: async ids => { checked.push(...ids); if (ids[0].endsWith('/rejected.jpg')) throw Object.assign(new Error('rejected'), { code: 'CONTENT_REJECTED' }); } });
+  const avatarId = 'cloud://env.bucket/avatars/alice/avatar.jpg';
+  const saved = await s.call('profile.save', { nickname: '行动派', avatarId });
+  assert.equal(saved.avatarUrl, 'https://test.invalid/signed/avatar.jpg');
+  assert.equal(saved.avatarId, undefined);
+  assert.deepEqual(checked, [avatarId]);
+  await s.call('profile.save', { nickname: '新昵称' });
+  assert.equal((await s.call('bootstrap')).user.avatarUrl, saved.avatarUrl);
+  for (const invalid of ['cloud://env.bucket/avatars/bobby/a.jpg', 'cloud://env.bucket/proofs/alice/a.jpg', 'https://test.invalid/a.jpg', 'cloud://env.bucket/avatars/alice/../bobby/a.jpg', null]) {
+    await assert.rejects(s.call('profile.save', { nickname: '不能保存', avatarId: invalid }), { code: 'INVALID_PHOTO' });
+  }
+  await assert.rejects(s.call('profile.save', { nickname: '不能保存', avatarId: 'cloud://env.bucket/avatars/alice/rejected.jpg' }), { code: 'CONTENT_REJECTED' });
+  assert.equal((await s.call('bootstrap')).user.nickname, '新昵称');
+  assert.equal((await s.store.get('users', 'alice')).avatarId, avatarId);
+  const goal = await s.goal();
+  await assert.rejects(s.call('record.save', { goalId: goal.id, note: '', photoIds: [avatarId] }), { code: 'INVALID_PHOTO' });
+  const { team } = await s.call('team.create', { name: '头像小队' });
+  await s.call('team.join', { code: team.id }, 'bobby');
+  assert.equal((await s.call('team.get', {}, 'bobby')).team.members[0].avatarUrl, saved.avatarUrl);
+  const share = await s.call('share.create', { mode: 'supervise' });
+  assert.equal((await s.call('share.get', { token: share.token }, 'bobby')).owner.avatarUrl, saved.avatarUrl);
+  await s.call('share.join', { token: share.token }, 'bobby');
+  assert.equal((await s.call('watch.list', {}, 'bobby')).watching[0].owner.avatarUrl, saved.avatarUrl);
+  await s.call('profile.save', { nickname: '新昵称', avatarId: '' });
+  assert.equal((await s.call('bootstrap')).user.avatarUrl, '');
+});
+test('avatar URL outages fall back without hiding the account or its goal', async () => {
+  const s = setup({ mediaURLs: async () => { throw new Error('temporary media failure'); } });
+  await s.call('profile.save', { nickname: '行动派', avatarId: 'cloud://env.bucket/avatars/alice/a.jpg' });
+  const goal = await s.goal();
+  const snapshot = await s.call('bootstrap');
+  assert.equal(snapshot.user.avatarUrl, ''); assert.equal(snapshot.goal.id, goal.id);
+});
+test('teammate history includes dates and summaries but never notes, proofs or another owner goal', async () => {
+  const s = setup(); const first = await s.goal();
+  await s.call('record.save', { goalId: first.id, note: 'PRIVATE NOTE', photoIds: ['cloud://env.bucket/proofs/alice/a.jpg'] });
+  await s.call('goal.archive', { goalId: first.id });
+  const { team } = await s.call('team.create', { name: '战绩小队' });
+  await s.call('team.join', { code: team.id }, 'bobby');
+  const foreignGoal = await s.goal('third_user');
+  await assert.rejects(s.call('team.memberGoals', { targetId: 'alice' }, 'third_user'), { code: 'TEAM_ACCESS' });
+  await assert.rejects(s.call('team.memberDetail', { targetId: 'alice', goalId: foreignGoal.id }, 'bobby'), { code: 'NOT_FOUND' });
+  const detail = await s.call('team.memberDetail', { targetId: 'alice', goalId: first.id }, 'bobby');
+  assert.equal(detail.goal.status, 'archived'); assert.equal(detail.summary.count, 1);
+  assert.deepEqual(detail.records, [{ date: '2026-10-29' }]);
+  assert.equal(detail.summary.calendar.filter(day => day.done).length, 1);
+  assert.ok(!JSON.stringify(detail).includes('PRIVATE')); assert.ok(!JSON.stringify(detail).includes('proofs/'));
+  for (let i = 0; i < 21; i++) { s.advance(1000); const goal = await s.goal(); await s.call('goal.archive', { goalId: goal.id }); }
+  const page = await s.call('team.memberGoals', { targetId: 'alice' }, 'bobby');
+  const next = await s.call('team.memberGoals', { targetId: 'alice', after: page.next }, 'bobby');
+  assert.equal(page.goals.length, 20); assert.equal(next.goals.length, 2); assert.equal(next.next, '');
+  assert.equal(new Set(page.goals.concat(next.goals).map(goal => goal.id)).size, 22);
+  await s.call('team.leave', {}, 'bobby');
+  await assert.rejects(s.call('team.memberGoals', { targetId: 'alice', after: page.next }, 'bobby'), { code: 'TEAM_ACCESS' });
+  await assert.rejects(s.call('team.memberDetail', { targetId: 'alice', goalId: first.id }, 'bobby'), { code: 'TEAM_ACCESS' });
+});
+test('teammate detail rechecks membership when the owner leaves during record loading', async () => {
+  const s = setup(); const goal = await s.goal(); const { team } = await s.call('team.create', { name: '退出测试' });
+  await s.call('team.join', { code: team.id }, 'bobby');
+  const list = s.store.list;
+  s.store.list = async (...args) => {
+    const result = await list(...args);
+    if (args[0] === 'records') await s.call('team.leave');
+    return result;
+  };
+  await assert.rejects(s.call('team.memberDetail', { targetId: 'alice', goalId: goal.id }, 'bobby'), { code: 'TEAM_ACCESS' });
+});
 test('runtime identity is required and spoofed payload identity does not change owner', async () => {
   const s = setup();
   await assert.rejects(s.service.execute('bootstrap', {}, ''), { code: 'UNAUTHENTICATED' });

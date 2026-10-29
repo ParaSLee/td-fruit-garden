@@ -19,7 +19,7 @@ function runtime({ cloud = false } = {}) {
     async chooseMedia() { return { tempFiles: [{ size: 2000, tempFilePath: 'wxfile://temp/proof.jpg' }] }; },
     async compressImage() { return { tempFilePath: 'wxfile://compressed/proof.jpg' }; },
     env: { USER_DATA_PATH: 'wxfile://usr' },
-    getFileSystemManager() { return { saveFile(options) { options.success({ savedFilePath: options.filePath }); } }; },
+    getFileSystemManager() { return { getFileInfo(options) { options.success({ size: 2000 }); }, saveFile(options) { options.success({ savedFilePath: options.filePath }); } }; },
     showModal(options) { calls.push(['modal', options]); options.success && options.success({ confirm: true }); },
     previewImage(value) { calls.push(['preview', value]); }
   };
@@ -79,6 +79,60 @@ test('profile nickname, archive and historical statistics work together', async 
   const profile = r.page('profile'); await profile.refresh(); profile.typeNickname({ detail: { value: '行动派' } }); await profile.saveNickname();
   assert.equal(profile.data.user.nickname, '行动派'); await profile.finishGoal(); assert.equal(profile.data.goal, null);
   const stats = r.page('stats'); await stats.refresh(); assert.equal(stats.data.goal.status, 'archived'); assert.equal(stats.data.summary.count, 1);
+});
+test('profile form uses submitted WeChat nickname and persists a chosen local avatar across page reopen', async () => {
+  const r = runtime(); const profile = r.page('profile'); await profile.refresh();
+  profile.editNickname(); profile.chooseAvatar({ detail: { avatarUrl: 'wxfile://temp/avatar.png' } });
+  profile.typeNickname({ detail: { value: '旧输入' } });
+  await profile.saveNickname({ detail: { value: { nickname: '微信昵称' } } });
+  assert.equal(profile.data.user.nickname, '微信昵称'); assert.equal(profile.data.editing, false);
+  assert.match(profile.data.user.avatarUrl, /^wxfile:\/\/usr\/avatar_/);
+  const reopened = r.page('profile'); await reopened.refresh();
+  assert.equal(reopened.data.user.avatarUrl, profile.data.user.avatarUrl);
+  reopened.editNickname(); reopened.chooseAvatar({ detail: { avatarUrl: 'wxfile://temp/cancelled.jpg' } }); reopened.editNickname();
+  assert.equal(reopened.data.user.avatarUrl, profile.data.user.avatarUrl);
+  reopened.editNickname(); reopened.removeAvatar(); await reopened.saveNickname();
+  assert.equal(reopened.data.user.avatarUrl, '');
+});
+test('profile upload is reused after save failure and nickname-only edits leave avatar unchanged', async () => {
+  const r = runtime({ cloud: true }); let uploads = 0; let saves = 0;
+  const snapshot = { user: { id: 'test-user', nickname: '原昵称', initial: '原', avatarUrl: '' }, goal: null, records: [], nudges: [] };
+  wx.getRandomValues = async () => ({ randomValues: new Uint8Array(16).buffer });
+  wx.cloud = {
+    async uploadFile(input) { uploads++; assert.match(input.cloudPath, /^avatars\/test-user\//); return { fileID: 'cloud://test/avatars/test-user/avatar.jpg' }; },
+    async callFunction({ data }) {
+      if (data.action === 'bootstrap') return { result: { ok: true, data: snapshot } };
+      if (data.action === 'watch.list') return { result: { ok: true, data: { watching: [], watchers: [], watchingNext: '', watchersNext: '' } } };
+      assert.equal(data.action, 'profile.save'); saves++;
+      if (saves <= 2) assert.equal(data.data.avatarId, 'cloud://test/avatars/test-user/avatar.jpg');
+      else assert.equal(Object.hasOwn(data.data, 'avatarId'), false);
+      if (saves === 1) return { result: { ok: false, error: { code: 'SERVICE_UNAVAILABLE', message: '请重试' } } };
+      snapshot.user.nickname = data.data.nickname; snapshot.user.avatarUrl = 'https://test.invalid/avatar.jpg';
+      return { result: { ok: true, data: snapshot.user } };
+    }
+  };
+  const profile = r.page('profile'); await profile.refresh(); profile.editNickname(); profile.chooseAvatar({ detail: { avatarUrl: 'wxfile://temp/avatar.jpg' } });
+  await profile.saveNickname(); assert.equal(profile.data.editing, true); assert.equal(profile.data.formError, '请重试');
+  await profile.saveNickname(); assert.equal(profile.data.editing, false); assert.equal(uploads, 1);
+  profile.editNickname(); profile.typeNickname({ detail: { value: '只改昵称' } }); await profile.saveNickname();
+  assert.equal(uploads, 1); assert.equal(profile.data.user.nickname, '只改昵称');
+});
+test('team member page opens history with dates and clears details after membership is removed', async () => {
+  const r = simulatedCloud();
+  const first = await r.api.call('goal.create', { category: 'water', title: '旧的喝水目标', days: 7 });
+  await r.api.call('record.save', { goalId: first.id, note: 'PRIVATE', photoIds: [] });
+  await r.api.call('goal.archive', { goalId: first.id });
+  const current = await r.api.call('goal.create', { category: 'sleep', title: '新的早睡目标', days: 21 });
+  const { team } = await r.api.call('team.create', { name: '历史战绩小队' });
+  r.login('test_bobby'); await r.api.call('team.join', { code: team.id });
+  const teamPage = r.page('team'); await teamPage.refresh(); teamPage.viewMember({ currentTarget: { dataset: { id: 'test_alice' } } });
+  assert.equal(r.calls.at(-1)[1].url, '/pages/member/index?id=test_alice');
+  const member = r.page('member'); member.onLoad({ id: 'test_alice' }); await member.refresh();
+  assert.equal(member.data.goal.id, current.id); assert.equal(member.data.goals.length, 2);
+  await member.chooseGoal({ detail: { value: member.data.goals.findIndex(goal => goal.id === first.id) } });
+  assert.equal(member.data.summary.count, 1); assert.deepEqual(member.data.records, [{ date: '2026-10-29' }]);
+  r.login('test_alice'); await r.api.call('team.leave'); r.login('test_bobby');
+  await member.refresh(); assert.match(member.data.loadError, /当前小队/); assert.equal(member.data.goal, null); assert.equal(member.data.records.length, 0);
 });
 test('cloud photo submission retains uploaded proof after a save failure and reuses it on retry', async () => {
   const r = runtime({ cloud: true });

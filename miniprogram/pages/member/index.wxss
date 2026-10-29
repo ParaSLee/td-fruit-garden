@@ -1,0 +1,5 @@
+@import "../stats/index.wxss";
+.member-heading { display:flex; align-items:center; gap:22rpx; margin:12rpx 0 20rpx; }
+.member-title { font-size:36rpx; font-weight:800; word-break:break-all; }
+.member-heading .eyebrow { font-size:17rpx; }
+.privacy-hint { margin-top:36rpx; line-height:1.8; }

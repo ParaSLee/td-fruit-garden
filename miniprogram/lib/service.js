@@ -9,6 +9,22 @@ function createService({ store, now = Date.now, randomId, mediaURLs = async ids 
   };
   const getRecords = goalId => store.list('records', { goalId }, { limit: 100, orderBy: 'date', direction: 'desc' });
   const getSummary = async goal => goal ? D.summary(goal, await getRecords(goal.id), D.dateKey(now())) : null;
+  async function userView(user) {
+    let avatarUrl = '';
+    if (user.avatarId) {
+      // An unavailable avatar must not hide goals or break team access.
+      try { avatarUrl = ((await mediaURLs([user.avatarId])).find(file => file.id === user.avatarId) || {}).url || ''; } catch (_) {}
+    }
+    return { ...D.publicUser(user), avatarUrl };
+  }
+  async function teamMember(uid, targetId) {
+    D.assert(typeof targetId === 'string' && targetId.length <= 200, 'INVALID_INPUT', '请选择小队成员');
+    const user = await store.get('users', uid);
+    const team = user.teamId ? await store.get('teams', user.teamId) : null;
+    const target = await store.get('users', targetId);
+    D.assert(team && team.memberIds.includes(uid) && team.memberIds.includes(targetId) && target && target.teamId === team.id, 'TEAM_ACCESS', '只能查看当前小队成员的战绩');
+    return target;
+  }
   async function ensureUser(uid) {
     return store.transact(async tx => {
       let user = await tx.get('users', uid);
@@ -37,7 +53,7 @@ function createService({ store, now = Date.now, randomId, mediaURLs = async ids 
       for (const record of recent) record.photos = record.photoIds.map(id => (urls.find(item => item.id === id) || {}).url).filter(Boolean);
     }
     for (const record of recent) delete record.photoIds;
-    return { owner: D.publicUser(user), goal: D.publicGoal(goal), summary: D.summary(goal, records, D.dateKey(now())), records: recent };
+    return { owner: await userView(user), goal: D.publicGoal(goal), summary: D.summary(goal, records, D.dateKey(now())), records: recent };
   }
   async function teamView(uid, teamId) {
     if (!teamId) return null;
@@ -48,7 +64,7 @@ function createService({ store, now = Date.now, randomId, mediaURLs = async ids 
       const goal = user.activeGoalId ? await store.get('goals', user.activeGoalId) : null;
       const stats = await getSummary(goal);
       const nudgeId = 'team_' + team.id + '_' + uid + '_' + id + '_' + D.dateKey(now());
-      return { ...D.publicUser(user), isSelf: id === uid, captain: team.captainId === id, goal: D.publicGoal(goal), summary: stats, nudgedToday: !!(await store.get('nudges', nudgeId)) };
+      return { ...(await userView(user)), isSelf: id === uid, captain: team.captainId === id, goal: D.publicGoal(goal), summary: stats, nudgedToday: !!(await store.get('nudges', nudgeId)) };
     }));
     return { id: team.id, name: team.name, motto: team.motto, inviteCode: team.id, captainId: team.captainId, members, checkedToday: members.filter(m => m.summary && m.summary.todayDone).length, maxMembers: 20 };
   }
@@ -70,17 +86,25 @@ function createService({ store, now = Date.now, randomId, mediaURLs = async ids 
       const goal = user.activeGoalId ? await store.get('goals', user.activeGoalId) : null;
       const records = goal ? await getRecords(goal.id) : [];
       const nudges = await store.list('nudges', { ownerId: uid }, { limit: 20, orderBy: 'createdAt', direction: 'desc' });
-      return { user: { ...D.publicUser(user), teamId: user.teamId }, goal: D.publicGoal(goal), records, summary: D.summary(goal, records, D.dateKey(now())), nudges, today: D.dateKey(now()), cloudEnabled };
+      return { user: { ...(await userView(user)), teamId: user.teamId }, goal: D.publicGoal(goal), records, summary: D.summary(goal, records, D.dateKey(now())), nudges, today: D.dateKey(now()), cloudEnabled };
     },
     async 'profile.save'(data, uid) {
       const nickname = D.text(data.nickname, 1, 16, '昵称');
       await moderate(nickname);
-      return store.transact(async tx => {
+      const changingAvatar = Object.prototype.hasOwnProperty.call(data, 'avatarId');
+      if (changingAvatar && data.avatarId !== '') {
+        const match = typeof data.avatarId === 'string' && data.avatarId.match(/^cloud:\/\/[^/]+\/avatars\/([^/]+)\/[a-zA-Z0-9_-]+\.(?:jpg|jpeg|png)$/);
+        D.assert(typeof data.avatarId === 'string' && (cloudEnabled ? match && match[1] === uid : /^local:[^\r\n]+$/.test(data.avatarId)), 'INVALID_PHOTO', '头像无效，请重新选择');
+        await validateMedia([data.avatarId], uid);
+      }
+      const saved = await store.transact(async tx => {
         const user = await tx.get('users', uid);
         user.nickname = nickname;
+        if (changingAvatar) user.avatarId = data.avatarId;
         await tx.set('users', uid, user);
-        return D.publicUser(user);
+        return user;
       });
+      return userView(saved);
     },
     async 'goal.create'(data, uid) {
       const input = D.validateGoal(data);
@@ -145,6 +169,26 @@ function createService({ store, now = Date.now, randomId, mediaURLs = async ids 
       return { files: ids.length ? await mediaURLs(ids) : [] };
     },
     async 'team.get'(_, uid, user) { needCloud(); return { team: await teamView(uid, user.teamId) }; },
+    async 'team.memberGoals'(data, uid) {
+      needCloud();
+      const target = await teamMember(uid, data.targetId);
+      const after = data.after || '';
+      D.assert(typeof after === 'string' && after.length <= 200, 'INVALID_INPUT', '分页位置不正确');
+      const rows = await store.list('goals', { ownerId: target.id }, { limit: 21, orderBy: 'id', direction: 'desc', after });
+      const result = { owner: await userView(target), activeGoalId: target.activeGoalId, goals: rows.slice(0, 20).map(D.publicGoal), next: rows.length > 20 ? rows[19].id : '' };
+      await teamMember(uid, target.id);
+      return result;
+    },
+    async 'team.memberDetail'(data, uid) {
+      needCloud();
+      const target = await teamMember(uid, data.targetId);
+      const goal = await store.get('goals', data.goalId);
+      D.assert(goal && goal.ownerId === target.id, 'NOT_FOUND', '这个目标不可查看');
+      const records = await getRecords(goal.id);
+      const result = { owner: await userView(target), goal: D.publicGoal(goal), summary: D.summary(goal, records, D.dateKey(now())), records: records.map(record => ({ date: record.date })) };
+      await teamMember(uid, target.id);
+      return result;
+    },
     async 'team.create'(data, uid) {
       needCloud();
       const name = D.text(data.name, 2, 20, '小队名称');
@@ -263,7 +307,7 @@ function createService({ store, now = Date.now, randomId, mediaURLs = async ids 
         result[current + 'Next'] = rows.length > 20 ? page[19].id : '';
         result[current] = await Promise.all(page.map(async watch => current === 'watching'
           ? { id: watch.id, ...(await viewProgress(await store.get('goals', watch.goalId), false)), nudgedToday: !!(await store.get('nudges', 'watch_' + watch.goalId + '_' + uid + '_' + D.dateKey(now()))) }
-          : { id: watch.id, goalId: watch.goalId, user: D.publicUser(await store.get('users', watch.watcherId)) }));
+          : { id: watch.id, goalId: watch.goalId, user: await userView(await store.get('users', watch.watcherId)) }));
       }
       return result;
     },

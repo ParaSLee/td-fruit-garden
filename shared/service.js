@@ -249,14 +249,23 @@ function createService({ store, now = Date.now, randomId, mediaURLs = async ids 
         return { watching: true };
       });
     },
-    async 'watch.list'(_, uid) {
+    async 'watch.list'(data, uid) {
       needCloud();
-      const watching = await store.list('watches', { watcherId: uid, enabled: true }, { limit: 50 });
-      const watchers = await store.list('watches', { ownerId: uid, enabled: true }, { limit: 50 });
-      return {
-        watching: await Promise.all(watching.map(async watch => ({ id: watch.id, ...(await viewProgress(await store.get('goals', watch.goalId), false)), nudgedToday: !!(await store.get('nudges', 'watch_' + watch.goalId + '_' + uid + '_' + D.dateKey(now()))) }))),
-        watchers: await Promise.all(watchers.map(async watch => ({ id: watch.id, goalId: watch.goalId, user: D.publicUser(await store.get('users', watch.watcherId)) })))
-      };
+      const side = data.side || 'all';
+      const after = data.after || '';
+      D.assert(['all', 'watching', 'watchers'].includes(side), 'INVALID_INPUT', '监督列表类型不正确');
+      D.assert(typeof after === 'string' && after.length <= 200 && (side !== 'all' || !after), 'INVALID_INPUT', '分页位置不正确');
+      const result = { watching: [], watchers: [], watchingNext: '', watchersNext: '' };
+      for (const current of side === 'all' ? ['watching', 'watchers'] : [side]) {
+        const filter = { [current === 'watching' ? 'watcherId' : 'ownerId']: uid, enabled: true };
+        const rows = await store.list('watches', filter, { limit: 21, orderBy: 'id', direction: 'asc', after });
+        const page = rows.slice(0, 20);
+        result[current + 'Next'] = rows.length > 20 ? page[19].id : '';
+        result[current] = await Promise.all(page.map(async watch => current === 'watching'
+          ? { id: watch.id, ...(await viewProgress(await store.get('goals', watch.goalId), false)), nudgedToday: !!(await store.get('nudges', 'watch_' + watch.goalId + '_' + uid + '_' + D.dateKey(now()))) }
+          : { id: watch.id, goalId: watch.goalId, user: D.publicUser(await store.get('users', watch.watcherId)) }));
+      }
+      return result;
     },
     async 'watch.nudge'(data, uid) {
       needCloud();

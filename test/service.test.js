@@ -93,6 +93,41 @@ test('progress sharing hides notes and images by default and cannot grant superv
   assert.equal(view.summary.count, 1); assert.ok(!JSON.stringify(view).includes('PRIVATE')); assert.ok(!JSON.stringify(view).includes('cloud://')); assert.equal(view.records[0].photos, undefined);
   await assert.rejects(s.call('share.join', { token: share.token }, 'bobby'), { code: 'SHARE_ACCESS' });
 });
+test('supervision lists page both directions beyond 50 relationships and keep removal accessible', async () => {
+  const s = setup();
+  await s.goal();
+  const invite = await s.call('share.create', { mode: 'supervise' });
+  for (let i = 0; i < 53; i++) {
+    const partner = 'partner_' + String(i).padStart(2, '0');
+    const goal = await s.goal(partner);
+    await s.call('record.save', { goalId: goal.id, note: 'PRIVATE', photoIds: ['cloud://test/proofs/' + partner + '/photo.jpg'] }, partner);
+    const other = await s.call('share.create', { mode: 'supervise', includePhotos: true }, partner);
+    await s.call('share.join', { token: other.token });
+    await s.call('share.join', { token: invite.token }, partner);
+  }
+  const first = await s.call('watch.list');
+  for (const side of ['watching', 'watchers']) {
+    assert.equal(first[side].length, 20);
+    const rows = [...first[side]];
+    let next = first[side + 'Next'];
+    while (next) {
+      const page = await s.call('watch.list', { side, after: next });
+      assert.ok(page[side].length <= 20);
+      assert.equal(page[side === 'watching' ? 'watchers' : 'watching'].length, 0);
+      rows.push(...page[side]); next = page[side + 'Next'];
+    }
+    assert.equal(rows.length, 53);
+    assert.equal(new Set(rows.map(row => row.id)).size, 53);
+    assert.ok(!JSON.stringify(rows).includes('PRIVATE'));
+    assert.ok(!JSON.stringify(rows).includes('https://test.invalid/signed/'));
+    await s.call('watch.remove', { watchId: rows[52].id });
+    assert.equal((await s.store.get('watches', rows[52].id)).enabled, false);
+    const outsider = await s.call('watch.list', { side, after: first[side + 'Next'] }, 'outsider');
+    assert.equal(outsider[side].length, 0);
+  }
+  await assert.rejects(s.call('watch.list', { side: 'users' }), { code: 'INVALID_INPUT' });
+  await assert.rejects(s.call('watch.list', { side: 'watching', after: {} }), { code: 'INVALID_INPUT' });
+});
 test('photo sharing requires explicit opt-in; revocation and expiry are enforced', async () => {
   const s = setup(); const g = await s.goal();
   await s.call('record.save', { goalId: g.id, note: 'PRIVATE', photoIds: ['cloud://env.bucket/proofs/alice/a.jpg'] });

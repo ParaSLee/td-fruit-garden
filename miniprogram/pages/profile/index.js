@@ -1,13 +1,33 @@
 const P = require('../../utils/page');
 Page({
-  data: { loading: true, loadError: '', user: {}, goal: null, summary: null, nickname: '', editing: false, saving: false, cloud: P.api.cloudEnabled(), watching: [], watchers: [], nudges: [] },
+  data: { loading: true, loadError: '', user: {}, goal: null, summary: null, nickname: '', editing: false, saving: false, cloud: P.api.cloudEnabled(), watching: [], watchers: [], watchingNext: '', watchersNext: '', loadingWatches: '', watchesError: '', watchesErrorSide: '', nudges: [] },
   onShow() { P.selectTab(this, 3); this.refresh(); },
   onPullDownRefresh() { this.refresh(); },
-  refresh() { return P.load(this, async () => {
-    const snapshot = P.decorate(await P.api.bootstrap());
-    const watches = P.api.cloudEnabled() ? await P.api.call('watch.list') : { watching: [], watchers: [] };
-    return { ...snapshot, ...watches, nickname: snapshot.user.nickname };
-  }); },
+  refresh() {
+    this.watchListVersion = (this.watchListVersion || 0) + 1;
+    this.setData({ loadingWatches: '', watchesError: '' });
+    return P.load(this, async () => {
+      const snapshot = P.decorate(await P.api.bootstrap());
+      const watches = P.api.cloudEnabled() ? await P.api.call('watch.list') : { watching: [], watchers: [], watchingNext: '', watchersNext: '' };
+      return { ...snapshot, ...watches, nickname: snapshot.user.nickname };
+    });
+  },
+  async loadMoreWatches(e) {
+    const side = e.currentTarget.dataset.side;
+    if (!['watching', 'watchers'].includes(side) || this.data.loading || this.data.loadingWatches || !this.data[side + 'Next']) return;
+    const version = this.watchListVersion;
+    this.setData({ loadingWatches: side, watchesError: '', watchesErrorSide: side });
+    try {
+      const result = await P.api.call('watch.list', { side, after: this.data[side + 'Next'] });
+      if (this.watchListVersion !== version) return;
+      const known = new Set(this.data[side].map(item => item.id));
+      this.setData({ [side]: this.data[side].concat(result[side].filter(item => !known.has(item.id))), [side + 'Next']: result[side + 'Next'] });
+    } catch (error) {
+      if (this.watchListVersion === version) this.setData({ watchesError: error.message });
+    } finally {
+      if (this.watchListVersion === version) this.setData({ loadingWatches: '' });
+    }
+  },
   editNickname() { this.setData({ editing: !this.data.editing }); },
   typeNickname(e) { this.setData({ nickname: e.detail.value }); },
   async saveNickname() {

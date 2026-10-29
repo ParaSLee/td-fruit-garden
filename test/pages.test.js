@@ -1,6 +1,9 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const crypto = require('node:crypto');
+const { createService } = require('../shared/service');
+const { createMemoryStore } = require('../shared/memory-store');
 const root = path.resolve(__dirname, '../miniprogram');
 function runtime({ cloud = false } = {}) {
   for (const key of Object.keys(require.cache)) if (key.startsWith(root)) delete require.cache[key];
@@ -30,6 +33,18 @@ function runtime({ cloud = false } = {}) {
     return instance;
   }
   return { page, app, storage, calls, api: require(path.join(root, 'utils/api.js')) };
+}
+// This transport exercises page controllers against isolated test identities.
+// It does not emulate WeChat authentication or replace two-account device acceptance.
+function simulatedCloud() {
+  const r = runtime({ cloud: true });
+  let uid = 'test_alice';
+  const service = createService({ store: createMemoryStore(), now: () => Date.parse('2026-10-29T04:00:00Z'), randomId: n => crypto.randomBytes(n).toString('hex') });
+  wx.cloud = { async callFunction({ data }) {
+    try { return { result: { ok: true, data: await service.execute(data.action, data.data, uid) } }; }
+    catch (error) { return { result: { ok: false, error: { code: error.code, message: error.message } } }; }
+  } };
+  return { ...r, login(next) { uid = next; r.app.globalData.snapshot = null; } };
 }
 test('native page controllers create a goal, save photo proof, reopen and update one daily record', async () => {
   const r = runtime(); const goal = r.page('goal');
@@ -87,4 +102,73 @@ test('cloud photo submission retains uploaded proof after a save failure and reu
   assert.equal(page.data.photos[0].id, 'cloud://test/proofs/test-user/photo.jpg');
   await page.save();
   assert.equal(page.data.saved, true); assert.equal(uploads, 1); assert.equal(saves, 2);
+});
+test('simulated cloud page journey joins a team, accepts supervision, reads reminders and removes access', async () => {
+  const r = simulatedCloud();
+  await r.api.call('goal.create', { category: 'water', title: '每天喝八杯水', days: 7 });
+  const team = r.page('team'); team.showCreate();
+  team.typeName({ detail: { value: '隔离测试小队' } }); await team.submit();
+  const code = team.data.team.inviteCode;
+  assert.match(team.onShareAppMessage().path, new RegExp('team=' + code));
+  const share = r.page('share'); share.options = { mode: 'supervise' };
+  await share.refresh(); await share.generate();
+  const token = share.data.token;
+  assert.ok(token); assert.match(share.onShareAppMessage().path, new RegExp('token=' + token));
+  r.login('test_bobby');
+  const invite = r.page('share'); invite.options = { team: code };
+  await invite.refresh(); assert.equal(invite.data.invite.memberCount, 1); await invite.joinTeam();
+  const partnerTeam = r.page('team'); await partnerTeam.refresh();
+  assert.equal(partnerTeam.data.team.members.length, 2);
+  assert.equal(partnerTeam.data.team.members.filter(m => m.isSelf).length, 1);
+  const receiver = r.page('share'); receiver.options = { token };
+  await receiver.refresh(); assert.equal(receiver.data.isOwner, false); assert.equal(receiver.data.watching, false);
+  await receiver.joinSupervision(); assert.equal(receiver.data.watching, true);
+  await receiver.nudge(); assert.equal(receiver.data.nudgedToday, true);
+  const partnerProfile = r.page('profile'); await partnerProfile.refresh();
+  assert.equal(partnerProfile.data.watching.length, 1);
+  assert.equal(partnerProfile.data.watching[0].nudgedToday, true);
+  await assert.rejects(r.api.call('watch.nudge', { watchId: partnerProfile.data.watching[0].id }), { code: 'ALREADY_NUDGED' });
+  r.login('test_alice');
+  const ownerProfile = r.page('profile'); await ownerProfile.refresh();
+  assert.equal(ownerProfile.data.watchers.length, 1);
+  assert.equal(ownerProfile.data.nudges.length, 1); assert.equal(ownerProfile.data.nudges[0].read, false);
+  await ownerProfile.readNudges(); assert.equal(ownerProfile.data.nudges[0].read, true);
+  const watchId = ownerProfile.data.watchers[0].id;
+  await ownerProfile.removeWatch({ currentTarget: { dataset: { id: watchId } } });
+  assert.equal(ownerProfile.data.watchers.length, 0);
+  await share.revoke(); assert.equal(share.data.token, '');
+  r.login('test_bobby'); await partnerProfile.refresh();
+  assert.equal(partnerProfile.data.watching.length, 0);
+  await assert.rejects(r.api.call('watch.nudge', { watchId }), { code: 'WATCH_ACCESS' });
+  await receiver.refresh(); assert.match(receiver.data.loadError, /失效/);
+  await partnerTeam.leave(); assert.equal(partnerTeam.data.team, null);
+  await assert.rejects(r.api.call('team.nudge', { targetId: 'test_alice' }), { code: 'TEAM_ACCESS' });
+});
+test('profile pagination retains rows after failure, retries and ignores an old response after refresh', async () => {
+  const r = simulatedCloud();
+  const profile = r.page('profile'); await profile.refresh();
+  const originalCall = wx.cloud.callFunction;
+  const first = { id: 'first-watch' }; const last = { id: 'last-watch' };
+  profile.setData({ watching: [first], watchingNext: first.id });
+  const event = { currentTarget: { dataset: { side: 'watching' } } };
+  let attempts = 0; let release;
+  wx.cloud.callFunction = async request => {
+    if (!request.data.data.side) return originalCall(request);
+    assert.equal(request.data.data.after, first.id);
+    attempts++;
+    if (attempts === 1) throw new Error('offline');
+    const response = { result: { ok: true, data: { watching: [first, last], watchingNext: '' } } };
+    return attempts === 2 ? response : new Promise(resolve => { release = () => resolve(response); });
+  };
+  await profile.loadMoreWatches(event);
+  assert.equal(profile.data.watching.length, 1); assert.equal(profile.data.watchingNext, first.id);
+  assert.match(profile.data.watchesError, /网络/); assert.equal(profile.data.loadingWatches, '');
+  await profile.loadMoreWatches(event);
+  assert.deepEqual(profile.data.watching.map(row => row.id), [first.id, last.id]);
+  assert.equal(profile.data.watchingNext, ''); assert.equal(profile.data.watchesError, '');
+  profile.setData({ watchingNext: first.id });
+  const pending = profile.loadMoreWatches(event);
+  assert.equal(profile.data.loadingWatches, 'watching');
+  await profile.refresh(); release(); await pending;
+  assert.equal(profile.data.watching.length, 0); assert.equal(profile.data.watchingNext, '');
 });
